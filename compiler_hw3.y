@@ -12,6 +12,7 @@
     #define FILE_NAME "hw3"
     #define STACK_SIZE 100
     #define SCOPE 10
+    #define LABEL "L_cmp"
 
     #define typeI 0
     #define typeB 1
@@ -35,6 +36,8 @@
 
     FILE *file;
 
+    int label_count=0;
+
     int scope = 0;
     int block_entry[10];
     int total_entry ;
@@ -42,10 +45,17 @@
     int id_type, var_type;
     char type_flag[10];
 
+    bool assign_mode = false;
+    int assign_int;
+    float assign_float;
+    char assign_id_type[10];
+    int left_id_index;
+
+    bool store_mode=false;
+
     bool HAS_ERROR = false;
 
-    int Find_scope, Find_index;
-    char Find_type[10];
+    int Find_scope, Find_index, Find_type;
     char Variable[30];
     int type_flag_gen=0;
 
@@ -76,6 +86,7 @@
     void return_code_gen();
     void arith_code_gen(char operator[10]);
     void type_casting();
+    void assign_code_gen(int type, char op[10]);
 %}
 
 %error-verbose
@@ -144,14 +155,17 @@ stmt
 declaration
     : VAR ID INT literal_initial   NEWLINE  { insert_symbol( scope, $2, "int32", yylineno, "-"); 
                                                 fprintf(file,"istore %d\n",lookup_symbol($2, scope));
+                                                Find_type = typeI;
                                             }
     | VAR ID STRING string_initial          { insert_symbol( scope, $2, "string", yylineno, "-"); 
                                                 fprintf(file,"astore %d\n",lookup_symbol($2, scope));
                                             }
     | VAR ID FLOAT literal_initial NEWLINE  { insert_symbol( scope, $2, "float32", yylineno, "-"); 
                                                 fprintf(file,"fstore %d\n",lookup_symbol($2, scope));
+                                                Find_type = typeF;
                                             }
-    | VAR ID BOOL bool_initial NEWLINE      { insert_symbol( scope, $2, "bool", yylineno, "-"); }
+    | VAR ID BOOL bool_initial NEWLINE      { insert_symbol( scope, $2, "bool", yylineno, "-"); 
+                                            }
     | VAR ID '[' INT_LIT ']' INT NEWLINE    {   printf("INT_LIT %d\n", $4);
                                                 insert_symbol( scope, $2, "array", yylineno, "int32"); 
                                             }
@@ -163,7 +177,22 @@ declaration
                             printf("INT_LIT %d\n",$3);
                         } 
         ']' array_initial NEWLINE
-    | ident assign NEWLINE
+    | ident assign   {          
+                                if(strcmp(assign_id_type,"int32")==0)
+                                    fprintf(file,"istore %d\n",left_id_index);
+                                else if(strcmp(assign_id_type,"float32")==0)
+                                    fprintf(file,"fstore %d\n",left_id_index);
+                                else if(strcmp(assign_id_type,"string")==0)
+                                    fprintf(file,"astore %d\n",left_id_index);
+                            } NEWLINE
+    | ID '=' expression {
+                                if(strcmp(table[lookup_symbol($1,scope)].type,"int32")==0)
+                                    fprintf(file,"istore %d\n",lookup_symbol($1,scope));
+                                else if(strcmp(table[lookup_symbol($1,scope)].type,"float32")==0)
+                                    fprintf(file,"fstore %d\n",lookup_symbol($1,scope));
+                                else if(strcmp(table[lookup_symbol($1,scope)].type,"string")==0)
+                                    fprintf(file,"astore %d\n",lookup_symbol($1,scope));
+                        } NEWLINE
 ;
 
 array_initial
@@ -178,13 +207,18 @@ bool_initial
 
 literal_initial
     : '=' literal 
-    |
+    |   {
+            if(Find_type==typeI)
+                fprintf(file,"ldc 0\n");
+            else if(Find_type==typeF)
+                fprintf(file,"ldc 0.000000\n");
+        }
 ;
 
 
 string_initial
-    : '=' '"' STRING_LIT '"' NEWLINE    {printf("STRING_LIT %s\n", $3);}
-    | NEWLINE
+    : '=' '"' STRING_LIT '"' NEWLINE    {printf("STRING_LIT %s\n", $3); fprintf(file,"ldc \"%s\"\n",$3);}
+    | {fprintf(file,"ldc \"\"\n");} NEWLINE 
 ;
 
 incdec_stmt
@@ -228,11 +262,30 @@ print_stmt
 
             fprintf(file,"getstatic java/lang/System/out Ljava/io/PrintStream;\n");
             fprintf(file,"swap\n");
+
             if(strcmp(type_flag,"int32")==0){
                 fprintf(file,"invokevirtual java/io/PrintStream/println(I)V\n");
             }
             else if(strcmp(type_flag,"float32")==0){
                 fprintf(file,"invokevirtual java/io/PrintStream/println(F)V\n");
+            }
+            else if(strcmp(type_flag,"bool")==0){
+                //fprintf(file,"iconst_1\n");
+                fprintf(file,"ifne %s_%d\n",LABEL,label_count);
+                fprintf(file,"ldc \"false\"\n");
+                fprintf(file,"goto %s_%d\n",LABEL,label_count+1);
+                fprintf(file,"%s_%d:\n",LABEL,label_count);
+                fprintf(file,"ldc \"true\"\n");
+                fprintf(file,"%s_%d:\n",LABEL,label_count+1);
+
+                fprintf(file,"getstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(file,"swap\n");
+                fprintf(file,"invokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
+
+                label_count +=2;
+            }
+            else if(strcmp(type_flag,"string")==0){
+                fprintf(file,"invokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
             }
         }
 
@@ -243,10 +296,28 @@ print_stmt
             fprintf(file,"getstatic java/lang/System/out Ljava/io/PrintStream;\n");
             fprintf(file,"swap\n");
             if(strcmp(type_flag,"int32")==0){
-                fprintf(file,"invokevirtual java/io/PrintStream/println(I)V\n");
+                fprintf(file,"invokevirtual java/io/PrintStream/print(I)V\n");
             }
             else if(strcmp(type_flag,"float32")==0){
-                fprintf(file,"invokevirtual java/io/PrintStream/println(F)V\n");
+                fprintf(file,"invokevirtual java/io/PrintStream/print(F)V\n");
+            }
+            else if(strcmp(type_flag,"bool")==0){
+                //fprintf(file,"iconst_1\n");
+                fprintf(file,"ifne %s_%d\n",LABEL,label_count);
+                fprintf(file,"ldc \"false\"\n");
+                fprintf(file,"goto %s_%d\n",LABEL,label_count+1);
+                fprintf(file,"%s_%d:\n",LABEL,label_count);
+                fprintf(file,"ldc \"true\"\n");
+                fprintf(file,"%s_%d:\n",LABEL,label_count+1);
+
+                fprintf(file,"getstatic java/lang/System/out Ljava/io/PrintStream;\n");
+                fprintf(file,"swap\n");
+                fprintf(file,"invokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
+
+                label_count +=2;
+            }
+            else if(strcmp(type_flag,"string")==0){
+                fprintf(file,"invokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
             }
         }
 ;
@@ -370,22 +441,68 @@ for_expr
 ;
 
 assign
-    : ADD_ASSIGN var    { printf("ADD_ASSIGN\n"); }
-    | SUB_ASSIGN var    { printf("SUB_ASSIGN\n"); }
-    | MUL_ASSIGN var    { printf("MUL_ASSIGN\n"); }
-    | QUO_ASSIGN var    { printf("QUO_ASSIGN\n"); }
-    | REM_ASSIGN var    { printf("REM_ASSIGN\n"); }
-    | error_assign
-;
+    : ADD_ASSIGN {assign_mode=true;} var    { 
+                            printf("ADD_ASSIGN\n"); 
+                            
+                            if(var_type==typeI){
+                                assign_code_gen(var_type,"iadd");
+                            }
+                            else if(var_type==typeF){
+                                assign_code_gen(var_type,"fadd");
+                            }
+                            
+                            assign_mode=false;
+                        }
+    | SUB_ASSIGN {assign_mode=true;} var {assign_mode=true;}    { 
+                            printf("SUB_ASSIGN\n"); 
 
-error_assign
-    : '=' var   { 
+                            if(var_type==typeI){
+                                assign_code_gen(var_type,"isub");
+                            }
+                            else if(var_type==typeF){
+                                assign_code_gen(var_type,"fsub");
+                            }
+                            assign_mode=false;
+                        }
+    | MUL_ASSIGN {assign_mode=true;} var    { 
+                            printf("MUL_ASSIGN\n"); 
+                            if(var_type==typeI){
+                                assign_code_gen(var_type,"imul");
+                            }
+                            else if(var_type==typeF){
+                                assign_code_gen(var_type,"fmul");
+                            }
+                            assign_mode=false;
+                        }
+    | QUO_ASSIGN {assign_mode=true;} var    { 
+                            printf("QUO_ASSIGN\n"); 
+                            if(var_type==typeI){
+                                assign_code_gen(var_type,"idiv");
+                            }
+                            else if(var_type==typeF){
+                                assign_code_gen(var_type,"fdiv");
+                            }
+                            assign_mode=false;
+                        }
+    | REM_ASSIGN {assign_mode=true;} var    { 
+                            printf("REM_ASSIGN\n"); 
+                            if(var_type==typeI){
+                                assign_code_gen(var_type,"irem");
+                            }
+                            assign_mode=false;
+                        }
+    | '=' var   { 
                     if(id_type != var_type) {
                         printf("error:%d: invalid operation: ASSIGN (mismatched types %s and %s)\n", yylineno, table[id_type].type, table[var_type].type);
                     }
                     printf("ASSIGN\n"); 
+                    
                 }
-    | ADD_ASSIGN ID     {   
+    | error_assign
+;
+
+error_assign
+    : ADD_ASSIGN ID     {   
                             int tmp = -1;
                             for(int i=0; i<=scope; i++) {
                                 if(lookup_symbol($2, i) != -1) 
@@ -442,10 +559,11 @@ ident
                         id_type = typeS;
                     } 
                     printf("IDENT (name=%s, address=%d)\n", $1, tmp);    
-                    strcpy(type_flag,table[tmp].type);                    
-                }
+                    strcpy(type_flag,table[tmp].type);   
 
-                Find_index = tmp;
+                    Find_index = tmp;                 
+                }
+                
             }
 ;
 
@@ -533,15 +651,15 @@ expression
 
 lor_expression
     : land_expression
-    | LOR expression  { printf("LOR\n"); }
+    | LOR expression  { printf("LOR\n"); fprintf(file,"ior\n");}
 ;
 
 land_expression
-    : LAND expression { printf("LAND\n"); }
+    : LAND expression { printf("LAND\n"); fprintf(file,"iand\n");}
 ;
 
 comparsion_expression
-    : expression '>' add_expression      { printf("GTR\n"); }
+    : expression '>' add_expression      { printf("GTR\n"); compare("GTR"); }
     | expression '<' add_expression      { printf("LSS\n"); }
     | expression GEQ add_expression      { printf("GEQ\n"); }
     | expression LEQ add_expression      { printf("LEQ\n"); }
@@ -619,9 +737,9 @@ term
 ;
 
 bool
-    : '!' bool      { printf("NOT\n"); strcpy(type_flag,"bool"); }  expression
-    | TRUE          { printf("TRUE\n"); strcpy(type_flag,"bool"); }
-    | FALSE         { printf("FALSE\n"); strcpy(type_flag,"bool");}
+    : '!' {fprintf(file,"iconst_1\n");}  bool  { printf("NOT\n"); strcpy(type_flag,"bool"); fprintf(file,"ixor\n");}  expression
+    | TRUE          { printf("TRUE\n"); strcpy(type_flag,"bool"); fprintf(file,"iconst_1\n");}
+    | FALSE         { printf("FALSE\n"); strcpy(type_flag,"bool"); fprintf(file,"iconst_0\n");}
 ;
 
 
@@ -632,45 +750,78 @@ literal
 
 int_literal
     : INT_LIT   {   printf("INT_LIT %d\n", $1); 
-                    fprintf(file,"ldc %d\n",$1);
+                    if(assign_mode==false)
+                        fprintf(file,"ldc %d\n",$1);
+                    else
+                        assign_int = $1;
                 }
 ;
 
 float_literal
     : FLOAT_LIT     {   printf("FLOAT_LIT %f\n", $1); 
-                        fprintf(file,"ldc %f\n",$1); 
+                        if(assign_mode==false)
+                            fprintf(file,"ldc %f\n",$1); 
+                        else
+                            assign_float = $1;
                     }
 ;
 
 sign_literal
     : SIGN_INT_LIT          {   
-                                printf("INT_LIT %d\n", abs($1)); 
+                                printf("INT_LIT %d\n", abs($1));  fprintf(file,"ldc %d\n",abs($1));
                                 if( $1 >=0 )
-                                    printf("POS\n");
-                                else
-                                    printf("NEG\n");
+                                    printf("POS\n"); 
+                                else{
+                                        printf("NEG\n");
+                                        fprintf(file,"ineg\n");
+                                }
+                                    
                             }
     | SIGN_FLOAT_LIT        {   
-                                printf("FLOAT_LIT %f\n", fabs($1)); 
+                                printf("FLOAT_LIT %f\n", fabs($1)); fprintf(file,"ldc %f\n",abs($1));
                                 if( $1 >=0 )
                                     printf("POS\n");
-                                else
-                                    printf("NEG\n");
+                                else{
+                                        printf("NEG\n");
+                                        fprintf(file,"fneg\n");
+                                }
+                                    
                             }
 ;
 
 string_literal
     : '"' STRING_LIT '"'    { printf("STRING_LIT %s\n", $2); 
                                 strcpy(type_flag,"string"); 
-                                fprintf(file,"ldc %s\n",$2);
+                                fprintf(file,"ldc \"%s\"\n",$2);
+                                strcpy(type_flag,"string");
                             }
 ;
 
 literal_convert
-    : INT '(' ident ')'         { printf("F to I\n"); id_type = typeI; }
-    | INT '(' FLOAT_LIT ')'     { printf("FLOAT_LIT %f\nF to I\n",$3);  }
-    | FLOAT '(' ident ')'       { printf("I to F\n"); }
-    | FLOAT '(' INT_LIT ')'     { printf("INT_LIT %d\nI to F\n",$3); id_type = typeI; }
+    : INT '(' ident ')'         { 
+                                    printf("F to I\n"); 
+                                    id_type = typeI; 
+                                    strcpy(type_flag,"int32");
+                                    fprintf(file,"fload %d\n",Find_index);
+                                    fprintf(file,"f2i\n");
+                                }
+    | INT '(' FLOAT_LIT ')'     { 
+                                    printf("FLOAT_LIT %f\nF to I\n",$3);  
+                                    fprintf(file,"ldc %f\n",$3);
+                                    fprintf(file,"f2i\n");
+                                }
+    | FLOAT '(' ident ')'       { 
+                                    printf("I to F\n"); 
+                                    strcpy(type_flag,"float32");
+                                    fprintf(file,"iload %d\n",Find_index);
+                                    fprintf(file,"i2f\n");
+                                }
+    | FLOAT '(' INT_LIT ')'     { 
+                                    printf("INT_LIT %d\nI to F\n",$3); 
+                                    id_type = typeI; 
+                                    fprintf(file,"ldc %d\n",$3);
+                                    fprintf(file,"i2f\n");
+                                }
 ;
 
 id_term
@@ -690,14 +841,32 @@ id_term
                     printf("error:%d: undefined: %s\n", yylineno+1, $1);
                 }
                 else {
-                    printf("IDENT (name=%s, address=%d)\n", $1, tmp); 
+                    printf("IDENT (name=%s, address=%d)\n", $1, tmp);
                     strcpy(type_flag,table[tmp].type);
+                    strcpy(assign_id_type,table[tmp].type);
+                    left_id_index = tmp;
                 }
-                
-                if(strcmp(type_flag,"int32")==0)
-                    fprintf(file,"iload %d\n",lookup_symbol($1,scope));
+                int tmp_scope=scope;
+                if(strcmp(type_flag,"int32")==0){
+                    if(lookup_symbol($1,scope)==-1){
+                        while(tmp_scope>=0){
+
+                            tmp_scope--;
+                            if(lookup_symbol($1,tmp_scope)!=-1){
+                                fprintf(file,"iload %d\n",lookup_symbol($1,tmp_scope));
+                                break;
+                            }
+                        }
+                    }
+                    else{
+                        fprintf(file,"iload %d\n",lookup_symbol($1,scope));
+                    }
+                }
                 else if(strcmp(type_flag,"float32")==0)
                     fprintf(file,"fload %d\n",lookup_symbol($1,scope));
+                else if(strcmp(type_flag,"string")==0)
+                    fprintf(file,"aload %d\n",lookup_symbol($1,scope));
+                
             }
 ;
 
@@ -790,114 +959,39 @@ static void dump_symbol(int level) {
     block_entry[level] = 0;
 }
 
+void compare_result_code_gen(char compare[10]){
+    fprintf(file,"%s %s_%d\n",compare,LABEL,label_count);
+    fprintf(file,"iconst_0\n");
+    fprintf(file,"goto %s_%d\n",LABEL,label_count+1);
+    fprintf(file,"%s_%d:\n",LABEL,label_count);
+    fprintf(file,"iconst_1\n");
+    fprintf(file,"%s_%d:\n",LABEL,label_count+1);
 
-void get_return_type(char type[10]){
-    if(strcmp(type,"int32")==0)
-        type_flag_gen = 0;
-    else if(strcmp(type,"float32")==0)
-        type_flag_gen = 1;
-    else if(strcmp(type,"bool")==0)
-        type_flag_gen = 2;
-    else if(strcmp(type,"string")==0)
-        type_flag_gen = 3;
-}
-
-void find_index_and_scope_andtype(){
-    // Find_scope , Find_index, Find_type
-}
-
-void store_code_gen(){
-    find_index_and_scope_andtype();
-    get_return_type(Find_type);
-
-    if(Find_scope>0){
-        if(type_flag_gen==0){
-            // f2i
-            fprintf(file,"istore %d\n",Find_index);
-        }
-        else if(type_flag_gen==1){
-            // i2f
-            fprintf(file,"fstore %d\n",Find_index);
-        }
-        else if(type_flag_gen==2){
-            fprintf(file,"istore %d\n",Find_index);
-        }
-        else if(type_flag_gen==3){
-            fprintf(file,"astore %d\n",Find_index);
-        }
-    }
+    label_count +=2;
 
 }
 
-void load_code_gen(){
-    find_index_and_scope_andtype();
-    get_return_type(Find_type);
+void compare(char operator[10]){
+    if(strcmp(type_flag,"int32")==0)
+        fprintf(file,"isub\n");
+    else if(strcmp(type_flag,"float32")==0)
+        fprintf(file,"fcmpl\n");
 
-    if(Find_scope>0){
-        if(type_flag_gen==0)
-            fprintf(file,"iload %d\n",Find_index);
-        else if(type_flag_gen==1){
-            fprintf(file,"fload %d\n",Find_index);
-        }
-        else if(type_flag_gen==2){
-            fprintf(file,"iload %d\n",Find_index);
-        }
-        else if(type_flag_gen==3){
-            fprintf(file,"aload %d\n",Find_index);
-        }
+    if(strcmp(operator,"GTR")==0){
+        compare_result_code_gen("ifgt");
     }
-    // else if (find_scope==0)
-    /*
-    if(type_flag_gen==0)
-
-    else if(type_flag_gen==1)
-
-    else if(type_flag_gen==2)
-
-    else if(type_flag_gen==3)
-    */
-
 }
 
-void arith_code_gen(char operator[10]){
-
-
-    type_casting();
-    if(strcmp(operator,"add")==0){
-        if(type_flag==0)
-            fprintf(file,"iadd\n");
-        else if(type_flag==1)
-            fprintf(file,"fadd\n");
+void assign_code_gen(int type,char op[10]){
+    if(type==typeI){
+        fprintf(file,"iload %d\n",Find_index);
+        fprintf(file,"ldc %d\n",assign_int);
+        fprintf(file,"%s\n",op);
     }
-    else if(strcmp(operator,"sub")==0){
-        if(type_flag==0)
-            fprintf(file,"isub\n");
-        else if(type_flag==1)
-            fprintf(file,"fsub\n");
+    else if(type==typeF){
+        fprintf(file,"fload %d\n",Find_index);
+        fprintf(file,"ldc %f\n",assign_float);
+        fprintf(file,"%s\n",op);
     }
-    else if(strcmp(operator,"mul")==0){
-        if(type_flag==0)
-            fprintf(file,"imul\n");
-        else if(type_flag==1)
-            fprintf(file,"fmul\n");
-    }
-    else if(strcmp(operator,"div")==0){
-        if(type_flag==0)
-            fprintf(file,"idiv\n");
-        else if(type_flag)
-            fprintf(file,"fdiv\n");
-    }
-    else if(strcmp(operator,"mod")==0){
-        if(type_flag==0)
-            fprintf(file,"irem\n");
-    }
-    /*
-    if(type_flag==0)
-
-    else if(type_flag==1)
-    */
-}
-
-void type_casting(){
 
 }
