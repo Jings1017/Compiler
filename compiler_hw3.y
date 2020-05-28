@@ -15,6 +15,8 @@
     #define LABEL "L_cmp"
     #define FOR_BEGIN "L_for_begin"
     #define FOR_EXIT "L_for_exit"
+    #define IF_FALSE "L_if_false"
+    #define IF_EXIT "L_if_exit"
 
     #define typeI 0
     #define typeB 1
@@ -42,6 +44,9 @@
     int label_for_begin_count=0;
     int label_for_exit_count=0;
     bool for_mode = false;
+
+    int label_if_false_count=0;
+    int label_if_exit_count=0;
 
     int scope = 0;
     int block_entry[10];
@@ -335,7 +340,7 @@ print_stmt
                 label_count +=2;
             }
             else if(strcmp(type_flag,"string")==0){
-                fprintf(file,"invokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n");
+                fprintf(file,"invokevirtual java/io/PrintStream/print(Ljava/lang/String;)V\n");
             }
         }
 ;
@@ -423,7 +428,13 @@ if_stmt
     | IF float_literal  {yyerror("float32");} block
     | IF string_literal {yyerror("string");} block
     | IF id_term        {yyerror("int32");} block
-    | IF expression block else_stmt
+    | IF expression {fprintf(file,"ifeq %s_%d\n",IF_FALSE,++label_if_false_count);} block 
+                    {
+                        fprintf(file,"goto %s_%d\n",IF_EXIT,label_if_false_count);
+                        
+                        fprintf(file,"%s_%d:\n",IF_FALSE,label_if_false_count);
+                    } 
+        else_stmt {fprintf(file,"%s_%d:\n",IF_EXIT,label_if_false_count--);}
 ;
 
 else_stmt
@@ -705,8 +716,8 @@ comparsion_expression
     : expression '>' add_expression      { printf("GTR\n"); compare("GTR"); }
     | expression '<' add_expression      { printf("LSS\n"); }
     | expression GEQ add_expression      { printf("GEQ\n"); }
-    | expression LEQ add_expression      { printf("LEQ\n"); }
-    | expression EQL add_expression      { printf("EQL\n"); }
+    | expression LEQ add_expression      { printf("LEQ\n"); compare("LEQ"); }
+    | expression EQL add_expression      { printf("EQL\n"); compare("EQL"); }
     | expression NEQ add_expression      { printf("NEQ\n"); }
     | expression add_expression
 ;
@@ -1030,6 +1041,12 @@ void compare(char operator[10]){
 
     if(strcmp(operator,"GTR")==0){
         compare_result_code_gen("ifgt");
+    }
+    else if(strcmp(operator,"EQL")==0){
+        compare_result_code_gen("ifeq");
+    }
+    else if(strcmp(operator,"LEQ")==0){
+        compare_result_code_gen("ifle");
     }
 }
 
