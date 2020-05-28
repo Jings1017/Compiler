@@ -13,6 +13,8 @@
     #define STACK_SIZE 100
     #define SCOPE 10
     #define LABEL "L_cmp"
+    #define FOR_BEGIN "L_for_begin"
+    #define FOR_EXIT "L_for_exit"
 
     #define typeI 0
     #define typeB 1
@@ -37,6 +39,9 @@
     FILE *file;
 
     int label_count=0;
+    int label_for_begin_count=0;
+    int label_for_exit_count=0;
+    bool for_mode = false;
 
     int scope = 0;
     int block_entry[10];
@@ -168,15 +173,28 @@ declaration
                                             }
     | VAR ID '[' INT_LIT ']' INT NEWLINE    {   printf("INT_LIT %d\n", $4);
                                                 insert_symbol( scope, $2, "array", yylineno, "int32"); 
+                                                fprintf(file,"ldc %d\n",$4);
+                                                fprintf(file,"newarray int\n");
+                                                fprintf(file,"astore %d\n",lookup_symbol($2, scope));
                                             }
     | VAR ID '[' INT_LIT ']' FLOAT NEWLINE  {   printf("INT_LIT %d\n", $4);
                                                 insert_symbol( scope, $2, "array", yylineno, "float32"); 
+                                                fprintf(file,"ldc %d\n",$4);
+                                                fprintf(file,"newarray float\n");
+                                                fprintf(file,"astore %d\n",lookup_symbol($2, scope));
                                             }
     | ID '[' INT_LIT    { 
                             printf("IDENT (name=%s, address=%d)\n", $1,lookup_symbol($1, scope));
                             printf("INT_LIT %d\n",$3);
+                            fprintf(file,"aload %d\n",lookup_symbol($1, scope));
+                            fprintf(file,"ldc %d\n",$3);
                         } 
-        ']' array_initial NEWLINE
+        ']' array_initial { 
+                                if(strcmp(table[lookup_symbol($1,scope)].element,"int32")==0)
+                                    fprintf(file,"iastore\n");
+                                else if(strcmp(table[lookup_symbol($1,scope)].element,"float32")==0)
+                                    fprintf(file,"fastore\n");
+                        } NEWLINE
     | ident assign   {          
                                 if(strcmp(assign_id_type,"int32")==0)
                                     fprintf(file,"istore %d\n",left_id_index);
@@ -414,30 +432,51 @@ else_stmt
     |
 ;
 
+
+
 for_stmt
-    : FOR float_literal '{' {
+    : FOR  float_literal '{' {
                             printf("error:%d: non-bool (type float32) used as for condition\n", yylineno+1);
                             scope++;
                         } 
-        stmts '}'  {scope--;}
+        stmts '}'  {
+                        scope--; for_mode=false; 
+                        fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                    }
     | FOR int_literal '{' {
                         printf("error:%d: non-bool (type int32) used as for condition\n", yylineno+1);
                         scope++;
                     } 
-        stmts '}'  {scope--;}
-    | FOR pure_arithmetic '{'   {
+        stmts '}'  {
+                        scope--;for_mode=false;
+                        fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                    }
+    | FOR  pure_arithmetic '{'   {
                                     printf("error:%d: non-bool (type int32) used as for condition\n", yylineno+1);
                                     scope++;
                                 } 
-        stmts '}'  {scope--;}
-    | FOR for_expr block
+        stmts '}'  {
+                    scope--;for_mode=false;
+                    fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                    }
+    | FOR  for_expr block  {
+                        for_mode=false;
+                        fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                    }
+        
 ;
 
 
 for_expr
     : ident assign ';' ident comparsion_expression ';' arithmetic_add_stmt
     | ident assign ';' ident comparsion_expression ';' incdec_stmt
-    | expression
+    | ident {   fprintf(file,"%s_%d:\n",FOR_BEGIN,label_for_begin_count);
+                fprintf(file,"iload %d\n",Find_index);
+            } '>' int_literal {for_mode=true; compare("GTR");}
 ;
 
 assign
@@ -453,7 +492,7 @@ assign
                             
                             assign_mode=false;
                         }
-    | SUB_ASSIGN {assign_mode=true;} var {assign_mode=true;}    { 
+    | SUB_ASSIGN {assign_mode=true;} var  { 
                             printf("SUB_ASSIGN\n"); 
 
                             if(var_type==typeI){
@@ -548,15 +587,19 @@ ident
                 else {
                     if( strcmp(table[tmp].type,"int32") == 0 ) {
                         id_type = typeI;
+                        strcpy(assign_id_type,"int32");
                     }
                     else if( strcmp(table[tmp].type,"float32") == 0 ) {
                         id_type = typeF;
+                        strcpy(assign_id_type,"float32");
                     }
                     else if( strcmp(table[tmp].type,"bool") == 0 ) {
                         id_type = typeB;
+                        strcpy(assign_id_type,"bool");
                     }
                     else if( strcmp(table[tmp].type,"string") == 0 ) {
                         id_type = typeS;
+                        strcpy(assign_id_type,"string");
                     } 
                     printf("IDENT (name=%s, address=%d)\n", $1, tmp);    
                     strcpy(type_flag,table[tmp].type);   
@@ -829,8 +872,14 @@ id_term
                 if(strcmp(table[lookup_symbol($1, scope)].type,"array")==0){
                     printf("IDENT (name=%s, address=%d)\n", $1, lookup_symbol($1, scope)); 
                 }
+                fprintf(file,"aload %d\n",lookup_symbol($1, scope));
             } 
-    '[' expression ']' {strcpy(type_flag,table[lookup_symbol($1, scope)].element);}
+    '[' expression  ']' {    strcpy(type_flag,table[lookup_symbol($1, scope)].element);
+                            if(strcmp(type_flag,"int32")==0)
+                                fprintf(file,"iaload\n");
+                            else if(strcmp(type_flag,"float32")==0)
+                                fprintf(file,"faload\n");
+                        }
 
     | ID    {   int tmp = -1;
                 for(int i=0; i<=scope; i++) {
@@ -966,6 +1015,8 @@ void compare_result_code_gen(char compare[10]){
     fprintf(file,"%s_%d:\n",LABEL,label_count);
     fprintf(file,"iconst_1\n");
     fprintf(file,"%s_%d:\n",LABEL,label_count+1);
+    if(for_mode==true)
+        fprintf(file,"ifeq %s_%d\n",FOR_EXIT,label_for_exit_count);
 
     label_count +=2;
 
