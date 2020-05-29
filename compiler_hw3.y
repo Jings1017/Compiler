@@ -61,6 +61,10 @@
     char assign_id_type[10];
     int left_id_index;
 
+    bool for_three = false;
+    char for_buffer[5][50];
+    char tmp_index[5];
+
     bool store_mode=false;
 
     bool HAS_ERROR = false;
@@ -246,18 +250,26 @@ string_initial
 
 incdec_stmt
     : ident INC         {   printf("INC\n");
-
-                            if(id_type==typeI){
-                                fprintf(file,"iload %d\n",Find_index);
-                                fprintf(file,"ldc 1\n");
-                                fprintf(file,"iadd\n");
-                                fprintf(file,"istore %d\n",Find_index);
+                            if(for_three==false){
+                                if(id_type==typeI){
+                                    fprintf(file,"iload %d\n",Find_index);
+                                    fprintf(file,"ldc 1\n");
+                                    fprintf(file,"iadd\n");
+                                    fprintf(file,"istore %d\n",Find_index);
+                                }
+                                else if(id_type==typeF){
+                                    fprintf(file,"fload %d\n",Find_index);
+                                    fprintf(file,"ldc 1.000000\n");
+                                    fprintf(file,"fadd\n");
+                                    fprintf(file,"fstore %d\n",Find_index);
+                                }
                             }
-                            else if(id_type==typeF){
-                                fprintf(file,"fload %d\n",Find_index);
-                                fprintf(file,"ldc 1.000000\n");
-                                fprintf(file,"fadd\n");
-                                fprintf(file,"fstore %d\n",Find_index);
+                            else{
+                                sprintf(tmp_index,"%d\n",Find_index);
+                                strcat(for_buffer[scope],"iload ");
+                                strcat(for_buffer[scope],tmp_index);
+                                strcat(for_buffer[scope],"ldc 1\niadd\nistore ");
+                                strcat(for_buffer[scope],tmp_index);
                             }
                             
                         }
@@ -453,7 +465,7 @@ for_stmt
         stmts '}'  {
                         scope--; for_mode=false; 
                         fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
-                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_begin_count++);
                     }
     | FOR int_literal '{' {
                         printf("error:%d: non-bool (type int32) used as for condition\n", yylineno+1);
@@ -462,7 +474,7 @@ for_stmt
         stmts '}'  {
                         scope--;for_mode=false;
                         fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
-                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_begin_count++);
                     }
     | FOR  pure_arithmetic '{'   {
                                     printf("error:%d: non-bool (type int32) used as for condition\n", yylineno+1);
@@ -471,21 +483,32 @@ for_stmt
         stmts '}'  {
                     scope--;for_mode=false;
                     fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
-                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_begin_count++);
                     }
     | FOR  for_expr block  {
                         for_mode=false;
-                        fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count++);
-                        fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_exit_count++);
+                        if(for_three==false){
+                            fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count);
+                            fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_begin_count);
+                        }
+                        else{
+                            fprintf(file,for_buffer[scope]);
+                            fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count);
+                            fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_begin_count);
+                        }
                     }
         
 ;
 
 
 for_expr
-    : ident assign ';' ident comparsion_expression ';' arithmetic_add_stmt
-    | ident assign ';' ident comparsion_expression ';' incdec_stmt
-    | ident {   fprintf(file,"%s_%d:\n",FOR_BEGIN,label_for_begin_count);
+    : ident assign {
+                        for_three=true; for_mode=true;
+                        fprintf(file,"istore %d\n",Find_index);
+                        fprintf(file,"%s_%d:\n",FOR_BEGIN,label_for_begin_count++);
+                    } 
+         ';' comparsion_expression ';' incdec_stmt
+    | ident {   fprintf(file,"%s_%d:\n",FOR_BEGIN,label_for_begin_count++);
                 fprintf(file,"iload %d\n",Find_index);
             } '>' int_literal {for_mode=true; compare("GTR");}
 ;
@@ -622,7 +645,7 @@ ident
 ;
 
 block
-    : '{' {scope++;} stmts '}'  { scope--; }
+    : '{' {scope++;} stmts '}'  { scope--; label_for_begin_count--; }
 ;
 
 arithmetic_add_stmt
@@ -714,11 +737,11 @@ land_expression
 
 comparsion_expression
     : expression '>' add_expression      { printf("GTR\n"); compare("GTR"); }
-    | expression '<' add_expression      { printf("LSS\n"); }
-    | expression GEQ add_expression      { printf("GEQ\n"); }
+    | expression '<' add_expression      { printf("LSS\n"); compare("LSS"); }
+    | expression GEQ add_expression      { printf("GEQ\n"); compare("GEQ"); }
     | expression LEQ add_expression      { printf("LEQ\n"); compare("LEQ"); }
     | expression EQL add_expression      { printf("EQL\n"); compare("EQL"); }
-    | expression NEQ add_expression      { printf("NEQ\n"); }
+    | expression NEQ add_expression      { printf("NEQ\n"); compare("NEQ"); }
     | expression add_expression
 ;
 
@@ -876,6 +899,16 @@ literal_convert
                                     fprintf(file,"ldc %d\n",$3);
                                     fprintf(file,"i2f\n");
                                 }
+    | INT '(' ID '[' INT_LIT ']' ')'    {
+                                            fprintf(file,"aload %d\n",lookup_symbol($3,scope));
+                                            fprintf(file,"ldc %d\n",$5);
+                                            fprintf(file,"faload\n");
+                                            fprintf(file,"f2i\n");
+                                        }
+    | INT '(' expression ')'    { 
+                                    printf("F to I\n"); 
+                                    fprintf(file,"f2i\n");
+                                }
 ;
 
 id_term
@@ -1027,8 +1060,7 @@ void compare_result_code_gen(char compare[10]){
     fprintf(file,"iconst_1\n");
     fprintf(file,"%s_%d:\n",LABEL,label_count+1);
     if(for_mode==true)
-        fprintf(file,"ifeq %s_%d\n",FOR_EXIT,label_for_exit_count);
-
+        fprintf(file,"ifeq %s_%d\n",FOR_EXIT,label_for_begin_count-1);
     label_count +=2;
 
 }
@@ -1042,11 +1074,20 @@ void compare(char operator[10]){
     if(strcmp(operator,"GTR")==0){
         compare_result_code_gen("ifgt");
     }
-    else if(strcmp(operator,"EQL")==0){
-        compare_result_code_gen("ifeq");
+    else if(strcmp(operator,"LSS")==0){
+        compare_result_code_gen("iflt");
+    }
+    else if(strcmp(operator,"GEQ")==0){
+        compare_result_code_gen("ifge");
     }
     else if(strcmp(operator,"LEQ")==0){
         compare_result_code_gen("ifle");
+    }
+    else if(strcmp(operator,"EQL")==0){
+        compare_result_code_gen("ifeq");
+    }
+    else if(strcmp(operator,"NEQ")==0){
+        compare_result_code_gen("ifne");
     }
 }
 
