@@ -44,6 +44,7 @@
     int label_for_begin_count=0;
     int label_for_exit_count=0;
     bool for_mode = false;
+    bool if_mode = false;
 
     int label_if_false_count=0;
     int label_if_exit_count=0;
@@ -167,14 +168,14 @@ stmt
 ;
 
 declaration
-    : VAR ID INT literal_initial   NEWLINE  { insert_symbol( scope, $2, "int32", yylineno, "-"); 
+    : VAR ID INT {Find_type=typeI;} literal_initial   NEWLINE  { insert_symbol( scope, $2, "int32", yylineno, "-"); 
                                                 fprintf(file,"istore %d\n",lookup_symbol($2, scope));
                                                 Find_type = typeI;
                                             }
     | VAR ID STRING string_initial          { insert_symbol( scope, $2, "string", yylineno, "-"); 
                                                 fprintf(file,"astore %d\n",lookup_symbol($2, scope));
                                             }
-    | VAR ID FLOAT literal_initial NEWLINE  { insert_symbol( scope, $2, "float32", yylineno, "-"); 
+    | VAR ID FLOAT {Find_type=typeF;} literal_initial NEWLINE  { insert_symbol( scope, $2, "float32", yylineno, "-"); 
                                                 fprintf(file,"fstore %d\n",lookup_symbol($2, scope));
                                                 Find_type = typeF;
                                             }
@@ -206,11 +207,11 @@ declaration
                         } NEWLINE
     | ident assign   {          
                                 if(strcmp(assign_id_type,"int32")==0)
-                                    fprintf(file,"istore %d\n",left_id_index);
+                                    fprintf(file,"istore %d\n",Find_index);
                                 else if(strcmp(assign_id_type,"float32")==0)
-                                    fprintf(file,"fstore %d\n",left_id_index);
+                                    fprintf(file,"fstore %d\n",Find_index);
                                 else if(strcmp(assign_id_type,"string")==0)
-                                    fprintf(file,"astore %d\n",left_id_index);
+                                    fprintf(file,"astore %d\n",Find_index);
                             } NEWLINE
     | ID '=' expression {
                                 if(strcmp(table[lookup_symbol($1,scope)].type,"int32")==0)
@@ -436,17 +437,13 @@ invalid_arithmetic
 ;
 
 if_stmt
-    : IF int_literal    {yyerror("int32");} block
-    | IF float_literal  {yyerror("float32");} block
-    | IF string_literal {yyerror("string");} block
-    | IF id_term        {yyerror("int32");} block
-    | IF expression {fprintf(file,"ifeq %s_%d\n",IF_FALSE,++label_if_false_count);} block 
+    : IF {if_mode=true;} expression {fprintf(file,"ifeq %s_%d\n",IF_FALSE,++label_if_false_count);} block 
                     {
                         fprintf(file,"goto %s_%d\n",IF_EXIT,label_if_false_count);
                         
                         fprintf(file,"%s_%d:\n",IF_FALSE,label_if_false_count);
                     } 
-        else_stmt {fprintf(file,"%s_%d:\n",IF_EXIT,label_if_false_count--);}
+        else_stmt {fprintf(file,"%s_%d:\n",IF_EXIT,label_if_false_count--);if_mode=false;}
 ;
 
 else_stmt
@@ -495,11 +492,11 @@ for_stmt
                             fprintf(file,for_buffer[scope]);
                             fprintf(file,"goto %s_%d\n",FOR_BEGIN,label_for_begin_count);
                             fprintf(file,"%s_%d:\n",FOR_EXIT,label_for_begin_count);
+                            if(label_for_begin_count==-2)
+                                label_for_begin_count+=2;
                         }
                     }
-        
 ;
-
 
 for_expr
     : ident assign {
@@ -622,18 +619,22 @@ ident
                     if( strcmp(table[tmp].type,"int32") == 0 ) {
                         id_type = typeI;
                         strcpy(assign_id_type,"int32");
+                        Find_type = typeI;
                     }
                     else if( strcmp(table[tmp].type,"float32") == 0 ) {
                         id_type = typeF;
                         strcpy(assign_id_type,"float32");
+                        Find_type = typeF;
                     }
                     else if( strcmp(table[tmp].type,"bool") == 0 ) {
                         id_type = typeB;
                         strcpy(assign_id_type,"bool");
+                        Find_type = typeB;
                     }
                     else if( strcmp(table[tmp].type,"string") == 0 ) {
                         id_type = typeS;
                         strcpy(assign_id_type,"string");
+                        Find_type = typeS;
                     } 
                     printf("IDENT (name=%s, address=%d)\n", $1, tmp);    
                     strcpy(type_flag,table[tmp].type);   
@@ -855,7 +856,7 @@ sign_literal
                                     
                             }
     | SIGN_FLOAT_LIT        {   
-                                printf("FLOAT_LIT %f\n", fabs($1)); fprintf(file,"ldc %f\n",abs($1));
+                                printf("FLOAT_LIT %f\n", fabs($1)); fprintf(file,"ldc %f\n",fabs($1));
                                 if( $1 >=0 )
                                     printf("POS\n");
                                 else{
@@ -904,8 +905,10 @@ literal_convert
                                             fprintf(file,"ldc %d\n",$5);
                                             fprintf(file,"faload\n");
                                             fprintf(file,"f2i\n");
+                                            strcpy(type_flag,"int32");
                                         }
     | INT '(' expression ')'    { 
+                                    strcpy(type_flag,"int32");
                                     printf("F to I\n"); 
                                     fprintf(file,"f2i\n");
                                 }
@@ -1059,7 +1062,7 @@ void compare_result_code_gen(char compare[10]){
     fprintf(file,"%s_%d:\n",LABEL,label_count);
     fprintf(file,"iconst_1\n");
     fprintf(file,"%s_%d:\n",LABEL,label_count+1);
-    if(for_mode==true)
+    if(for_mode==true && if_mode==false)
         fprintf(file,"ifeq %s_%d\n",FOR_EXIT,label_for_begin_count-1);
     label_count +=2;
 
