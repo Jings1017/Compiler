@@ -92,15 +92,8 @@
         
     /* code gen function */
 
-    void get_return_type(char type[10]);
-    void find_index_and_scope_andtype();
-    void store_code_gen();
-    void load_code_gen();
     void compare_result_code_gen(char compare_type[10]);
     void compare(char operator[10]);
-    void return_code_gen();
-    void arith_code_gen(char operator[10]);
-    void type_casting();
     void assign_code_gen(int type, char op[10]);
 %}
 
